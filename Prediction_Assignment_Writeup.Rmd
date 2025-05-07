@@ -1,0 +1,191 @@
+---
+title: "Practical Machine Learning"
+author: "Rudra Patel"
+date: "5/7/2025"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Practical Machine Learning Project
+
+# Overview
+
+This document serves as the conclusive summary of the Peer Assessment initiative within the Practical Machine Learning curriculum offered through the Coursera John’s Hopkins University Data Science Specialization. Crafted and executed in RStudio, leveraging its knitr functionalities, the report is presented in both html and markdown formats. The primary objective of this endeavor is to forecast the performance of six participants in completing designated exercises. Employing a machine learning algorithm trained on the ‘classe’ variable within the training dataset, predictions are made on the performance of 20 test cases contained in the test data.
+
+
+# Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement ??? a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+# Data
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+##Loading data:
+
+```{r cross-validation, warning=FALSE, message=FALSE, echo=TRUE}
+
+library(lattice)
+library(caret)
+library(corrplot)
+library(randomForest)
+library(rattle)
+library(RColorBrewer)
+library(ggplot2)
+library(rpart)
+library(rpart.plot)
+set.seed(666)
+
+```
+Data loading :
+```{r load data, warning=FALSE, message=FALSE, echo=TRUE}
+
+trainingdataset <-  read.csv("./pml-training.csv",na.strings=c("NA","#DIV/0!",""))
+testingdataset  <- read.csv("./pml-testing.csv",na.strings=c("NA","#DIV/0!",""))
+
+```
+
+
+
+##Dataset Partitioning
+After loading the data, we’ll split the training set, using 75% for model training and the remaining 25% for validation.
+
+```{r dataset-Partitioning, warning=FALSE, message=FALSE, echo=TRUE}
+# Dataset Partitioning
+TrainingPart <- createDataPartition(trainingdataset$classe, p=0.75, list=FALSE)
+trainingdata <- trainingdataset[TrainingPart, ]
+testingdata <- trainingdataset[-TrainingPart, ]
+```
+```{r train dim data, warning=FALSE, message=FALSE, echo=TRUE}
+dim(trainingdata)
+```
+```{r test dim data, warning=FALSE, message=FALSE, echo=TRUE}
+dim(testingdata)
+```
+
+Filtering to the 95% threshhold and removing Nulls/Near-Zero-Variance
+
+```{r filter data, warning=FALSE, message=FALSE, echo=TRUE}
+# Filtering to the 95% threshold and removing Nulls/Near-Zero-Variance
+NearZeroVariables <- nearZeroVar(trainingdata)
+trainingdata <- trainingdata[, -NearZeroVariables]
+testingdata <- testingdata[, -NearZeroVariables]
+
+Nulls <- sapply(trainingdata, function(x) mean(is.na(x))) > 0.95
+trainingdata <- trainingdata[, Nulls == FALSE]
+testingdata <- testingdata[, Nulls == FALSE]
+
+# Remove Id Variables
+trainingdata <- trainingdata[, -(1:5)]
+testingdata <- testingdata[, -(1:5)]
+```
+
+```{r filtered train dim data, warning=FALSE, message=FALSE, echo=TRUE}
+dim(trainingdata)
+```
+
+```{r filtered test dim data, warning=FALSE, message=FALSE, echo=TRUE}
+dim(testingdata)
+```
+
+The number of variables has been reduced from 160 to 54. 
+
+#Model Analysis
+
+##Correlation Analysis
+
+```{r correlation analysis, warning=FALSE, message=FALSE, echo=TRUE}
+# Calculate correlation matrix
+correlationmatrix <- cor(trainingdata[, -54])
+
+# Convert correlation matrix to tidy format
+correlationmatrix_tidy <- as.data.frame(as.table(correlationmatrix))
+colnames(correlationmatrix_tidy) <- c("Variable1", "Variable2", "Correlation")
+
+# Plot heatmap using ggplot2
+ggplot(correlationmatrix_tidy, aes(x = Variable1, y = Variable2, fill = Correlation)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1,1), space = "Lab", 
+                       name="Correlation") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(), 
+        axis.title.y = element_blank(),  
+        axis.text.x = element_text(angle = 90, vjust = 1, size = 6),  
+        axis.text.y = element_text(size = 6)) +  
+  coord_fixed()
+```
+
+The above correlation matrix shows each cell representing the correlation coefficient between two variables, with color intensity indicating the strength and direction of the correlation. Blue denotes negative correlation, red indicates positive correlation, and white suggests no correlation. Clusters of similarly colored cells highlight groups of correlated variables, facilitating the understanding of relationships between variables for data analysis and modeling.
+
+## Prediction Models
+
+###Random Forest Model
+```{r random forest model, warning=FALSE, message=FALSE, echo=TRUE}
+set.seed(666)
+controlrandomforest <- trainControl(method = "repeatedcv", number = 5, repeats = 2)
+fitrandomforest <- train(classe ~ ., data = trainingdata, method = "rf",
+                         trControl = controlrandomforest, verbose = FALSE)
+fitrandomforest$finalModel
+```
+
+**Predictions on Test Data**
+```{r pred random forest model, warning=FALSE, message=FALSE, echo=TRUE}
+predict_RF <- predict(fitrandomforest, newdata = testingdata)
+confusionmatrixrf <- confusionMatrix(predict_RF, factor(testingdata$classe))
+confusionmatrixrf
+```
+
+###Decision Tree Model
+```{r decision tree model, warning=FALSE, message=FALSE, echo=TRUE}
+set.seed(666)
+fit_decision_tree <- rpart(classe ~ ., data = trainingdata, method="class")
+
+rpart.plot(fit_decision_tree, box.palette = "RdYlGn", shadow.col = "gray")
+```
+**Predictions on Test Data**
+```{r pred decision tree model, warning=FALSE, message=FALSE, echo=TRUE}
+predict_decision_tree <- predict(fit_decision_tree, newdata = testingdata, type="class")
+conf_matrix_decision_tree <- confusionMatrix(predict_decision_tree, factor(testingdata$classe))
+conf_matrix_decision_tree
+```
+
+#Model Accuracy
+In this report, the Random Forest model demonstrates the highest accuracy, achieving a remarkable value of 99.84%. We can present the model’s predictions confidently based on this performance.
+
+```{r model accuracy, warning=FALSE, message=FALSE, echo=TRUE}
+# Get predictions for the 20 observations of the original pml-testing.csv
+
+predictionmodel <- as.data.frame(predict(fitrandomforest, newdata = testingdataset))
+predictionmodel
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
